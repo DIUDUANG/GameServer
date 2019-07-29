@@ -1,0 +1,60 @@
+syntax="proto3";
+package GameMsgType;
+//无关选项，用于客户端
+option csharp_namespace="Pb";
+
+/*1号消息或201号消息*/
+message SyncPid{
+    int32 Pid=1;
+    string Username=2;
+}
+
+/*3号消息*/
+message Position{
+    float X=1;//横坐标
+    float Y=2;//高
+    float Z=3;//纵坐标
+    float V=4;//视角单位是度（0~360）
+    int32 BloodValue=5;//血量（保留）
+}
+
+/*玩家信息：id，姓名，坐标*/
+message Player{
+    int32 Pid=1;
+    Position P=2;
+    string Username=3;
+}
+
+/*多个玩家   202号消息（告诉刚出生玩家周围有谁）*/
+message SyncPlayers{
+    repeated Player ps=1;
+
+}
+/*废弃*/
+message MovePackege{
+    Position P=1;
+    int32 ActionData=2;
+
+}
+
+/*200号消息*/
+message BroadCast{
+    int32 Pid=1;
+	/*广播内容类型，1--》聊天内容；2---》出生位置；4----》移动后的位置*/
+    int32 Tp=2;
+    
+    oneof Data {
+        string Content=3;
+        Position P=4;
+        /*ActionData暂时预留*/
+        int32 ActionData=5;
+
+    }
+    string Username=6;
+
+}
+
+/*2号消息*/
+message Talk{
+    string Content=1;
+}
