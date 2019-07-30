@@ -25,5 +25,9 @@ ZinxTcpData* GameChannelFact::CreateTcpDataChannel(int _fd) {
   //将协议对象绑定到角色对象
   pGameRole->BindProtocol(pGameProtocol);
 
+  //将role对象和protocol对象添加到kernel中
+  ZinxKernel::Zinx_Add_Proto(*pGameProtocol);
+  ZinxKernel::Zinx_Add_Role(*pGameRole);
+
   return pGameChannel;
 }

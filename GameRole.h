@@ -7,6 +7,7 @@
 class GameRole : public Irole, public AOI_Player {
  public:
   GameRole();
+  ~GameRole();
   void BindProtocol(Iprotocol* _pProtocol);
 
   // 通过 AOI_Player 继承
@@ -29,6 +30,15 @@ class GameRole : public Irole, public AOI_Player {
   GameMsg* MakeLogoff();
   //构造广播聊天消息
   GameMsg* MakeTalkBroadCast(std::string _talkContent);
+  //构造新位置广播消息
+  GameMsg* MakeNewPositionBroadCast();
+
+  //处理移动消息
+  void ProcNewPosition(float _x, float _y, float _z, float _v);
+  //视野消失
+  void ViewLost(GameRole* _oldSrd);
+  //视野出现
+  void ViewAppear(GameRole* _newSrd);
 
   Iprotocol* pGameProtocol;
   int iPid;           //玩家ID

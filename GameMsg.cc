@@ -29,7 +29,7 @@ GameMsg::GameMsg(MSG_TYPE _msg_type, std::string Value)
   case MSG_TYPE_SRD_PLAYERS:  //÷‹ŒßÕÊº“Œª÷√
     pMsgContent = new GameMsgType::SyncPlayers();
     break;
-
+    
   default:
     break;
   }

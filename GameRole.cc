@@ -1,11 +1,21 @@
 #include "GameRole.h"
+#include <iostream>
+#include <random>
+#include <algorithm>
 #include "MultiMsg.h"
 #include "AOI_World.h"
 #include "msg.GameMsgType.h"
+#include "NamePool.h"
+#include "ExitFrameworkTask.h"
+#include "TimeoutDeliver.h"
 
+namespace {
+AOI_World g_world(0, 400, 0, 400, 20, 20);
+int g_curID = 0;
+std::default_random_engine randSrc(time(NULL));
+ExitFrameworkTask* peft = NULL;
+}
 
-static AOI_World g_world(0, 400, 0, 400, 20, 20);
-static int g_curID = 0;
 
 
 GameRole::GameRole() 
@@ -15,10 +25,14 @@ GameRole::GameRole()
       y(0),
       z(0),
       v(0){
-  x = 100;
-  z = 100;
-  m_name = "ccc";
+  x = 200 + randSrc() % 50;
+  z = 100 + randSrc() % 10;
+  m_name = NamePool::GetInstance().GetName();
   iPid = g_curID++;
+}
+
+GameRole::~GameRole() {
+  NamePool::GetInstance().ReleaseName(m_name);
 }
 
 void GameRole::BindProtocol(Iprotocol* _pProtocol) {
@@ -27,6 +41,15 @@ void GameRole::BindProtocol(Iprotocol* _pProtocol) {
 
 //新客户端连接后
 bool GameRole::Init() {
+  //若是第一个玩家-->删除退出定时任务
+  if (ZinxKernel::Zinx_GetAllRole().size() <= 0) {
+    if (NULL != peft) {
+      TimeoutDeliver::GetInstance()->UnregisterTask(peft);
+      delete peft;
+      peft = NULL;
+    }
+  }
+
   //将玩家添加到游戏世界中
   g_world.AddPlayer(this);
 
@@ -68,11 +91,17 @@ UserData* GameRole::ProcMsg(UserData& _poUserData) {
           GameRole* player = dynamic_cast<GameRole*>(role);
           GameMsg* poutMsg = MakeTalkBroadCast(talkContent);
           ZinxKernel::Zinx_SendOut(*poutMsg, *(player->pGameProtocol));
-        }
-        
+        } 
         break;
 
       case GameMsg::MSG_TYPE_NEW_POSITION:
+        /*处理移动处理*/
+        //取出坐标信息
+        ProcNewPosition(
+          dynamic_cast<GameMsgType::Position*>(r->pMsgContent)->x(),
+          dynamic_cast<GameMsgType::Position*>(r->pMsgContent)->y(),
+          dynamic_cast<GameMsgType::Position*>(r->pMsgContent)->z(),
+          dynamic_cast<GameMsgType::Position*>(r->pMsgContent)->v());
         break;
 
       default:
@@ -81,7 +110,7 @@ UserData* GameRole::ProcMsg(UserData& _poUserData) {
   }
  
 
-  return nullptr;
+  return NULL;
 }
 
 void GameRole::Fini() {
@@ -92,13 +121,18 @@ void GameRole::Fini() {
     GameRole* player = dynamic_cast<GameRole*>(r);
     GameMsg* logOffMsg = MakeLogoff();
     ZinxKernel::Zinx_SendOut(*logOffMsg, *(player->pGameProtocol));
-
   }
-
-
 
   //从游戏世界中删除玩家
   g_world.DelPlayer(this);
+
+  //判断如果是最后一个人--->调起退出定时器  
+  if (ZinxKernel::Zinx_GetAllRole().size() <= 1) {
+    peft = new ExitFrameworkTask();
+    TimeoutDeliver::GetInstance()->RegisterTask(20, peft);
+  }
+
+
 }
 
 GameMsg* GameRole::MakeLoginIDName() {
@@ -114,7 +148,7 @@ GameMsg* GameRole::MakeLoginIDName() {
 GameMsg* GameRole::MakeSrdPlayers() {
   GameMsg* ret = new GameMsg(GameMsg::MSG_TYPE::MSG_TYPE_SRD_PLAYERS);
   //将GameRole属性赋值给ret->pMsgContent
-  GameMsgType::SyncPlayers* syncPlayerMsg = dynamic_cast<GameMsgType::SyncPlayers*>(ret->pMsgContent);
+  auto syncPlayerMsg = dynamic_cast<GameMsgType::SyncPlayers*>(ret->pMsgContent);
   //获取周围玩家,循环设置到syncPlayerMsg
   std::list<AOI_Player*> player_list = g_world.GetSrdPlayers(this);
   for (auto r : player_list) {
@@ -171,6 +205,92 @@ GameMsg* GameRole::MakeTalkBroadCast(std::string _talkContent) {
   broadCastTalk->set_content(_talkContent);
 
   return ret;
+}
+
+GameMsg* GameRole::MakeNewPositionBroadCast() {
+  GameMsg* ret = new GameMsg(GameMsg::MSG_TYPE_BROAD_CAST);
+  auto newPosMsg = dynamic_cast<GameMsgType::BroadCast*>(ret->pMsgContent);
+  newPosMsg->set_pid(iPid);
+  newPosMsg->set_tp(4);
+  newPosMsg->set_username(m_name);
+
+  GameMsgType::Position* position = newPosMsg->mutable_p();
+  position->set_x(x);
+  position->set_y(y);
+  position->set_z(z);
+  position->set_v(v);
+
+  return ret;
+}
+/*处理移动处理*/
+void GameRole::ProcNewPosition(float _x, float _y, float _z, float _v) {
+
+  /*1.跨网格视野处理*/
+  //获取旧邻居
+  std::list<AOI_Player *> oldSrd = g_world.GetSrdPlayers(this);
+
+  //摘除玩家--->更新坐标--->添加玩家
+  g_world.DelPlayer(this);
+  x = _x;
+  y = _y;
+  z = _z;
+  v = _v;
+  g_world.AddPlayer(this);
+
+  //获取新数据
+  std::list<AOI_Player*> newSrd = g_world.GetSrdPlayers(this);
+
+  //遍历旧邻居,在新邻居中查找,没找到-->视野消失
+  for (auto single : oldSrd) {
+    //find算法会返回查找到的元素的迭代器,没找到旧返回.end()
+    if (newSrd.end() == find(newSrd.begin(), newSrd.end(), single)) {
+      GameRole* player = dynamic_cast<GameRole*>(single);
+      //视野消失
+      ViewLost(player);
+    }
+  }
+
+  //遍历新邻居,在旧邻居中查找,没找到--->视野出现
+  for (auto single : newSrd) {
+    if (oldSrd.end() == find(oldSrd.begin(), oldSrd.end(), single)) {
+      GameRole* player = dynamic_cast<GameRole*>(single);
+      //视野出现
+      ViewAppear(player);
+    }
+  }
+
+  /*2.广播新位置给周围玩家*/
+  for (auto single : newSrd) {
+    auto pMsg = MakeNewPositionBroadCast();
+    auto player = dynamic_cast<GameRole*>(single);
+    ZinxKernel::Zinx_SendOut(*pMsg, *(player->pGameProtocol));
+  }
+  
+}
+
+void GameRole::ViewLost(GameRole* _oldSrd) {
+  //向旧邻居循环法自己的下线消息
+    GameMsg* logOffMsg = this->MakeLogoff();
+    ZinxKernel::Zinx_SendOut(*logOffMsg, *(_oldSrd->pGameProtocol));
+
+  //向自己发旧邻居的下线消息
+
+    logOffMsg = _oldSrd->MakeLogoff();
+    ZinxKernel::Zinx_SendOut(*logOffMsg, *(this->pGameProtocol));
+
+}
+
+void GameRole::ViewAppear(GameRole* _newSrd) {
+  //循环发送自己的出现消息(广播出生位置)给新邻居
+
+    GameMsg* appear = this->MakeInitPos();
+    ZinxKernel::Zinx_SendOut(*appear, *(_newSrd->pGameProtocol));
+
+  //循环发送邻居的出现消息给自己
+
+    appear = _newSrd->MakeInitPos();
+    ZinxKernel::Zinx_SendOut(*appear, *(this->pGameProtocol));
+
 }
 
 int GameRole::get_x() {
