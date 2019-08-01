@@ -8,6 +8,8 @@
 #include "NamePool.h"
 #include "ExitFrameworkTask.h"
 #include "TimeoutDeliver.h"
+#include "hiredis/hiredis.h"
+
 
 namespace {
 AOI_World g_world(0, 400, 0, 400, 20, 20);
@@ -66,13 +68,24 @@ bool GameRole::Init() {
   std::list<AOI_Player*> players_list = g_world.GetSrdPlayers(this);
   //循环发送
   for (auto r : players_list) {
-    //过早自己出生位置信息
+    //构造自己出生位置信息
     GameMsg* pInitPos = MakeInitPos();
     ZinxKernel::Zinx_SendOut(
       *pInitPos,
       *(dynamic_cast<GameRole*>(r)->pGameProtocol));
   }
 
+  //添加昵称到redis数据库 GameName链表中
+  auto context = redisConnect("127.0.0.1", 6379);
+  if (NULL != context) {
+    //向redis数据插入玩家姓名
+    auto cmd = redisCommand(context, "lpush GameName %s", this->m_name.c_str());
+    //释放命令对象
+    freeReplyObject(cmd);
+    cmd = NULL;
+    //释放连接
+    redisFree(context);
+  }
 
   return true;
 }
@@ -130,6 +143,18 @@ void GameRole::Fini() {
   if (ZinxKernel::Zinx_GetAllRole().size() <= 1) {
     peft = new ExitFrameworkTask();
     TimeoutDeliver::GetInstance()->RegisterTask(20, peft);
+  }
+
+  //从redis数据库中删除玩家姓名
+  auto context = redisConnect("127.0.0.1  ", 6379);
+  if (NULL != context) {
+    //从redis数据库删除玩家姓名
+    auto cmd = redisCommand(context, "lrem GameName 1 %s", this->m_name.c_str());
+    //释放命令对象
+    freeReplyObject(cmd);
+    cmd = NULL;
+    //释放连接
+    redisFree(context);
   }
 
 
